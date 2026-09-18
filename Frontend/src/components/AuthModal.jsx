@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ShieldAlert, X, Lock, KeyRound, CheckCircle, ArrowRight, ShieldCheck, User } from 'lucide-react';
 
-export default function AuthModal({ isOpen, onClose }) {
+export default function AuthModal({ isOpen, onClose, onAllowPrototype }) {
   const [step, setStep] = useState(1); // 1: Badge & Passcode, 2: 2FA OTP, 3: Success Clearance
   const [badgeId, setBadgeId] = useState('IND-7741');
   const [passcode, setPasscode] = useState('••••••••••••');
@@ -266,7 +266,10 @@ export default function AuthModal({ isOpen, onClose }) {
             }}>
               Landing page specification verified. Core platform screens will load in accordance with Phase 2 implementation.
             </div>
-            <button onClick={resetModal} className="btn-secondary" style={{ width: '100%', padding: '11px' }}>
+            <button onClick={onAllowPrototype || resetModal} className="btn-gov-accent" style={{ width: '100%', padding: '11px' }}>
+              Open Prototype Dashboard
+            </button>
+            <button onClick={resetModal} className="btn-secondary" style={{ width: '100%', padding: '11px', marginTop: '10px' }}>
               Return to Landing Page
             </button>
           </div>

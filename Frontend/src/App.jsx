@@ -8,9 +8,11 @@ import TrustEvidence from './components/TrustEvidence';
 import FinalCta from './components/FinalCta';
 import Footer from './components/Footer';
 import AuthModal from './components/AuthModal';
+import CrimeDashboard from './components/CrimeDashboard';
 
 export default function App() {
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [showPrototype, setShowPrototype] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', 'light');
@@ -20,44 +22,38 @@ export default function App() {
     setAuthModalOpen(true);
   };
 
+  const handlePrototypeAccess = () => {
+    setShowPrototype(true);
+    setAuthModalOpen(false);
+  };
+
+  if (showPrototype) {
+    return <CrimeDashboard />;
+  }
+
   return (
     <div className="app-shell" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* WCAG Accessible Skip Link */}
       <a href="#main-content" className="skip-to-content">
         Skip to main content
       </a>
 
-      {/* Section 1: Navbar */}
       <Navbar onEnterPlatform={handleEnterPlatform} />
 
-      {/* Main Content Sections */}
       <main id="main-content" tabIndex="-1" style={{ outline: 'none', flex: 1 }}>
-        {/* Section 2: Hero (Neoclassical Government Architecture + Central Narrative) */}
         <Hero onEnterPlatform={handleEnterPlatform} />
-
-        {/* Section: How an Officer Can Access the Platform */}
         <OfficerAccessSection onEnterPlatform={handleEnterPlatform} />
-
-        {/* Section 3: How It Works (5-Step Intelligence Pipeline) */}
         <HowItWorks />
-
-        {/* Section 4: Capabilities */}
         <Capabilities />
-
-        {/* Section 5: Trust / Evidence */}
         <TrustEvidence />
-
-        {/* Section 6: Final CTA */}
         <FinalCta onEnterPlatform={handleEnterPlatform} />
       </main>
 
-      {/* Official Footer */}
       <Footer />
 
-      {/* Interactive Law Enforcement Authentication Modal */}
       <AuthModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
+        onAllowPrototype={handlePrototypeAccess}
       />
     </div>
   );
