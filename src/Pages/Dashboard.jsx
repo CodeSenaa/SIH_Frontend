@@ -1,13 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import gsap from 'gsap';
+import {
+  Paperclip,
+  Zap,
+  AlertCircle,
+  CheckCircle2,
+  FileSpreadsheet,
+  FileText,
+  UploadCloud,
+  X,
+  Lock
+} from 'lucide-react';
+import NetworkGraph, { DEFAULT_GRAPH_DATA } from './NetworkGraph';
+import TimelineView from '../components/Timeline/TimelineView';
+import CaseWorkspaceView from '../components/CaseWorkspace/CaseWorkspaceView';
 
-const navItems = ['Overview', 'Entity Graph', 'Timeline', 'Case Workspace', 'Alerts', 'Search', 'Reports', 'Audit Log', 'Admin'];
+const navItems = ['Investigate', 'Entity Graph', 'Timeline', 'Case Workspace', 'Alerts', 'Search', 'Reports', 'Audit Log', 'Admin'];
 
 const stats = [
-  { label: 'Active Case Operations', value: '14', detail: 'Ongoing' },
-  { label: 'High-Risk Suspects', value: '08', detail: 'Critical watchlist' },
-  { label: 'Signal Intercepts', value: '1,429', detail: 'Leads today' },
-  { label: 'Evidence Reviews', value: '06', detail: 'Unassigned' },
 ];
 
 const riskSignals = [
@@ -52,35 +62,102 @@ const graphLinks = [
   { source: 'nitin', sourceType: 'person', target: 'karan', targetType: 'person', label: 'Reinforced storage loop' },
 ];
 
-const initialMessages = [
-  { sender: 'system', text: 'Case engine ready. Upload two files or ask for a network summary.' },
-  { sender: 'officer', text: 'Find me suspicious links around Ravi Desai and the car jacking network.' },
-  { sender: 'system', text: 'I found a linked cluster including Mehul Saran, Nitin Shah, and Asha Verma. The graph highlights the shared car jacking route and financial laundering trail.' },
+const samplePrompts = [
+  'Find me suspicious links around Ravi Desai and the car jacking network.',
+  'Trace money laundering trail and shell accounts tied to Silverline Ledger.',
+  'Map safehouse coordinates and logistics handoffs via Neha Kulkarni.',
 ];
 
-const buildAssistantReply = (query) => {
+const sampleEvidencePresets = [
+  { name: 'FIR_442_CarJacking_Nexus.pdf', size: 1840000, type: 'application/pdf' },
+  { name: 'Hawala_Ledger_Silverline.csv', size: 3420000, type: 'text/csv' },
+  { name: 'CDR_Interception_Dump_Ravi.csv', size: 2150000, type: 'text/csv' },
+];
+
+const initialMessages = [];
+
+const buildAssistantReply = (query, attachedFiles = []) => {
   const lower = query.toLowerCase();
+  const fileContext = attachedFiles && attachedFiles.length > 0
+    ? ` Evidence ingested from ${attachedFiles.join(' & ')}.`
+    : '';
 
   if (lower.includes('car') || lower.includes('jacking')) {
-    return 'The strongest cluster appears around Ravi Desai, linked to a car jacking ring involving Mehul Saran and Nitin Shah. Asha Verma is tied to the money trail and fake documentation, while Neha Kulkarni coordinates safehouse logistics.';
+    return `Cross-referencing entity links from case evidence.${fileContext} The strongest cluster appears around Ravi Desai, linked to a car jacking ring involving Mehul Saran and Nitin Shah. Asha Verma is tied to the money trail and fake documentation, while Neha Kulkarni coordinates safehouse logistics.`;
   }
 
   if (lower.includes('money') || lower.includes('laundering')) {
-    return 'The network shows a laundering chain through Silverline Ledger and Asha Verma, with Ravi Desai acting as the central coordinator. The route connects shell entities, document forgery, and later vehicle transfers.';
+    return `Cross-referencing financial ledgers and shell routing.${fileContext} The network shows a laundering chain through Silverline Ledger and Asha Verma, with Ravi Desai acting as the central coordinator. The route connects shell entities, document forgery, and later vehicle transfers.`;
   }
 
-  return 'I identified a connected network of suspects and crimes. Ravi Desai remains the central figure, supported by transport, document falsification, and safehouse logistics nodes. The graph is designed to show the relationship and crime context clearly.';
+  return `Parsed case evidence records.${fileContext} I identified a connected network of suspects and crimes. Ravi Desai remains the central figure, supported by transport, document falsification, and safehouse logistics nodes. The graph is designed to show the relationship and crime context clearly.`;
 };
 
 export default function Dashboard({ onNavigateToLanding }) {
+  const [activeTab, setActiveTab] = useState('Entity Graph');
   const [uploads, setUploads] = useState([]);
-  const [query, setQuery] = useState('Find me suspicious links around Ravi Desai and the car jacking network.');
+  const [query, setQuery] = useState('');
   const [messages, setMessages] = useState(initialMessages);
-  const [activeQuery, setActiveQuery] = useState('Find me suspicious links around Ravi Desai and the car jacking network.');
+  const [activeQuery, setActiveQuery] = useState('');
+  const [isGraphOpen, setIsGraphOpen] = useState(false);
+  const [isLoadingGraph, setIsLoadingGraph] = useState(false);
+  const [loadingStep, setLoadingStep] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Font scale accessibility state
+  const [fontScale, setFontScale] = useState('md'); // 'sm' | 'md' | 'lg'
+
+  // Interactive session countdown timer (initialized to 09:42 = 582s)
+  const [sessionSeconds, setSessionSeconds] = useState(582);
+  const [showSessionNotice, setShowSessionNotice] = useState(false);
+
+  useEffect(() => {
+    const scaleMap = {
+      sm: '14px',
+      md: '16px',
+      lg: '18px',
+    };
+    document.documentElement.style.fontSize = scaleMap[fontScale] || '16px';
+    return () => {
+      document.documentElement.style.fontSize = '';
+    };
+  }, [fontScale]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSessionSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleExtendSession = () => {
+    setSessionSeconds((prev) => (prev <= 0 ? 600 : prev + 600));
+    setShowSessionNotice(true);
+    setTimeout(() => setShowSessionNotice(false), 2400);
+  };
+
+  const formatSessionTime = (seconds) => {
+    if (seconds <= 0) return '00:00';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  const timerRef = useRef(null);
+  const stepTimerRef = useRef([]);
   const fileInputRef = useRef(null);
   const statCardRefs = useRef([]);
   const graphRef = useRef(null);
   const prototypeNoteRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const sideMessagesEndRef = useRef(null);
 
   useEffect(() => {
     const cards = statCardRefs.current.filter(Boolean);
@@ -127,24 +204,31 @@ export default function Dashboard({ onNavigateToLanding }) {
   }, []);
 
   useEffect(() => {
+    if (!isGraphOpen) return;
     const container = graphRef.current;
     if (!container) return;
 
     const lines = container.querySelectorAll('.link-line, .link-label');
     const nodes = container.querySelectorAll('.graph-node, .crime-node');
 
+    gsap.fromTo(
+      container,
+      { opacity: 0, y: 20, scale: 0.98 },
+      { opacity: 1, y: 0, scale: 1, duration: 0.5, ease: 'power2.out' }
+    );
+
     if (!lines.length && !nodes.length) return;
 
     gsap.fromTo(
       lines,
       { opacity: 0, scaleX: 0.3 },
-      { opacity: 1, scaleX: 1, duration: 1.1, ease: 'power2.out', stagger: 0.05 }
+      { opacity: 1, scaleX: 1, duration: 1.1, ease: 'power2.out', stagger: 0.05, delay: 0.1 }
     );
 
     gsap.fromTo(
       nodes,
       { opacity: 0, y: 18, scale: 0.92 },
-      { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: 'back.out(1.6)', stagger: 0.08, delay: 0.12 }
+      { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: 'back.out(1.6)', stagger: 0.08, delay: 0.2 }
     );
 
     nodes.forEach((node) => {
@@ -163,7 +247,12 @@ export default function Dashboard({ onNavigateToLanding }) {
         node.onpointerleave = null;
       });
     };
-  }, []);
+  }, [isGraphOpen]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    sideMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isGraphOpen]);
 
   useEffect(() => {
     const card = prototypeNoteRef.current;
@@ -218,75 +307,244 @@ export default function Dashboard({ onNavigateToLanding }) {
     []
   );
 
+  const formatFileSize = (bytes) => {
+    if (!bytes) return '1.8 MB';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
   const handleUpload = (event) => {
     const selectedFiles = Array.from(event.target.files || []);
     if (!selectedFiles.length) return;
 
-    const nextFiles = selectedFiles.slice(0, 2);
-    setUploads((previous) => [...previous, ...nextFiles].slice(0, 2));
+    const formattedFiles = selectedFiles.map((file) => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      isLocal: true,
+    }));
+
+    setUploads((previous) => {
+      const combined = [...previous, ...formattedFiles].slice(0, 2);
+      if (combined.length > 0) {
+        setUploadError('');
+      }
+      return combined;
+    });
     event.target.value = '';
   };
 
+  const handleAddPresetFile = (preset) => {
+    setUploads((previous) => {
+      if (previous.some((f) => f.name === preset.name)) return previous;
+      const updated = [...previous, preset].slice(0, 2);
+      if (updated.length > 0) {
+        setUploadError('');
+      }
+      return updated;
+    });
+  };
+
+  const handleRemoveFile = (index) => {
+    setUploads((previous) => previous.filter((_, i) => i !== index));
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (!droppedFiles.length) return;
+
+    const formattedFiles = droppedFiles.map((file) => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      isLocal: true,
+    }));
+
+    setUploads((previous) => {
+      const combined = [...previous, ...formattedFiles].slice(0, 2);
+      if (combined.length > 0) {
+        setUploadError('');
+      }
+      return combined;
+    });
+  };
+
+  const triggerGraphSynthesis = (submittedText) => {
+    setIsLoadingGraph(true);
+    setLoadingStep('Ingesting case dossiers & CDR call records...');
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+    stepTimerRef.current.forEach((t) => clearTimeout(t));
+    stepTimerRef.current = [];
+
+    const steps = [
+      { delay: 1200, text: 'Cross-referencing IMEI identifiers & Hawala shell ledgers...' },
+      { delay: 2600, text: 'Resolving entity aliases & high-risk suspect clusters...' },
+      { delay: 4100, text: 'Computing safehouse coordinates & link weights...' },
+      { delay: 5200, text: 'Finalizing interactive relationship graph...' },
+    ];
+
+    steps.forEach(({ delay, text }) => {
+      const t = setTimeout(() => {
+        setLoadingStep(text);
+      }, delay);
+      stepTimerRef.current.push(t);
+    });
+
+    timerRef.current = setTimeout(() => {
+      setIsLoadingGraph(false);
+      setIsGraphOpen(true);
+      setActiveTab('Entity Graph');
+    }, 6000); // 6.0s realistic synthesis delay (between 5-7s)
+  };
+
   const handleQuerySubmit = (event) => {
-    event.preventDefault();
-    const trimmed = query.trim();
+    if (event) event.preventDefault();
+    if (isLoadingGraph) return;
 
-    if (!trimmed) return;
+    const trimmed = query.trim() || 'Ravi Desai syndicate & car jacking nexus';
+    const fileNames = uploads.length > 0
+      ? uploads.map((f) => f.name)
+      : ['FIR_442_CarJacking_Nexus.pdf', 'Hawala_Ledger_Silverline.csv'];
 
+    setUploadError('');
     setMessages((previous) => [
       ...previous,
-      { sender: 'officer', text: trimmed },
-      { sender: 'system', text: buildAssistantReply(trimmed) },
+      { sender: 'officer', text: trimmed, attachedFiles: fileNames },
+      { sender: 'system', text: buildAssistantReply(trimmed, fileNames) },
     ]);
 
     setActiveQuery(trimmed);
     setQuery('');
+    triggerGraphSynthesis(trimmed);
   };
+
+  const handleSelectPrompt = (promptText) => {
+    if (isLoadingGraph) return;
+    setQuery(promptText);
+
+    const fileNames = uploads.length > 0
+      ? uploads.map((f) => f.name)
+      : ['FIR_442_CarJacking_Nexus.pdf', 'Hawala_Ledger_Silverline.csv'];
+
+    setUploadError('');
+    setMessages((previous) => [
+      ...previous,
+      { sender: 'officer', text: promptText, attachedFiles: fileNames },
+      { sender: 'system', text: buildAssistantReply(promptText, fileNames) },
+    ]);
+
+    setActiveQuery(promptText);
+    setQuery('');
+    triggerGraphSynthesis(promptText);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      stepTimerRef.current.forEach((t) => clearTimeout(t));
+    };
+  }, []);
 
   return (
     <div className="app-shell">
-      <div className="classification-bar">RESTRICTED // FOR AUTHORIZED LAW ENFORCEMENT & INTELLIGENCE PERSONNEL ONLY (FOUO)</div>
 
       <header className="topbar">
-        <div className="brand-block">
+        <div className="brand-block" onClick={onNavigateToLanding} role="button" tabIndex={0} style={{ cursor: 'pointer' }} title="Return to Overview / Landing">
           <div className="brand-logo-wrap">
-            <img src="/logo.jpeg" alt="NATINT Intelligence Studio logo" className="brand-mark" />
+            <img src="/logo.jpeg" alt="CrimeLens logo" className="brand-mark" />
           </div>
           <div className="brand-copy">
             <span className="brand-tag">CrimeLens</span>
-            <div className="brand-title">NATINT Intelligence Studio</div>
-            <div className="brand-subtitle">Operation Phantom Ledger</div>
           </div>
         </div>
 
         <div className="case-switcher">
           <span className="label">CASE</span>
-          <strong>Op Phantom</strong>
+          <strong>FIR 10-30256</strong>
         </div>
 
-        <div className="search-box">
-          <span>Search</span>
-          <kbd>Ctrl + K</kbd>
-        </div>
 
         <div className="utility-cluster">
-          <div className="font-scaler">A- A A+</div>
-          <div className="session-pill">09:42 remaining</div>
-          <div className="profile-pill">
-            <span className="avatar">IO</span>
-            <span>Badge 2-17 / Level-4</span>
+          <div className="font-scaler" role="group" aria-label="Font size controls">
+            <button
+              type="button"
+              className={`font-scaler-btn ${fontScale === 'sm' ? 'active' : ''}`}
+              onClick={() => setFontScale('sm')}
+              title="Decrease font size (Small)"
+            >
+              A-
+            </button>
+            <button
+              type="button"
+              className={`font-scaler-btn ${fontScale === 'md' ? 'active' : ''}`}
+              onClick={() => setFontScale('md')}
+              title="Default font size (Normal)"
+            >
+              A
+            </button>
+            <button
+              type="button"
+              className={`font-scaler-btn ${fontScale === 'lg' ? 'active' : ''}`}
+              onClick={() => setFontScale('lg')}
+              title="Increase font size (Large)"
+            >
+              A+
+            </button>
           </div>
+
+          <button
+            type="button"
+            className={`session-pill ${sessionSeconds <= 60 ? 'danger' : sessionSeconds <= 180 ? 'warning' : ''}`}
+            onClick={handleExtendSession}
+            title="Click to extend session (+10m)"
+          >
+            <span className="session-pill-dot" />
+            <span>
+              {sessionSeconds > 0
+                ? `${formatSessionTime(sessionSeconds)} remaining`
+                : 'Session expired (Extend)'}
+            </span>
+            {showSessionNotice && (
+              <span className="session-extend-toast">+10m Extended</span>
+            )}
+          </button>
         </div>
       </header>
 
       <div className="workspace-layout">
         <aside className="sidebar">
-          {navItems.map((item, index) => (
+          {navItems.map((item) => (
             <button
               key={item}
-              className={index === 1 ? 'nav-item active' : 'nav-item'}
+              className={item === activeTab ? 'nav-item active' : 'nav-item'}
               type="button"
-              onClick={item === 'Overview' ? onNavigateToLanding : undefined}
+              onClick={() => {
+                if (item === 'Overview') {
+                  setActiveTab('Overview');
+                } else {
+                  setActiveTab(item);
+                  if (item === 'Entity Graph') {
+                    setIsGraphOpen(true);
+                  }
+                }
+              }}
             >
               <span className="nav-dot" />
               {item}
@@ -294,152 +552,354 @@ export default function Dashboard({ onNavigateToLanding }) {
           ))}
         </aside>
 
-        <main className="main-panel">
-          <div className="breadcrumb">Home / Operations / Operation Phantom Ledger / Entity Graph</div>
+        <main className={`main-panel ${activeTab === 'Entity Graph' ? 'graph-fullspace' : ''}`}>
+          {activeTab !== 'Entity Graph' && (
+            <div className="breadcrumb">Home / Operations / Operation Phantom Ledger / {activeTab}</div>
+          )}
 
-          <section className="stats-grid" aria-label="System metrics">
-            {stats.map((stat, index) => (
-              <article
-                key={stat.label}
-                ref={(element) => {
-                  statCardRefs.current[index] = element;
-                }}
-                className="stat-card"
-              >
-                <div className="stat-label">{stat.label}</div>
-                <div className="stat-value">{stat.value}</div>
-                <div className="stat-detail">{stat.detail}</div>
-              </article>
-            ))}
-          </section>
-
-          <div className="dashboard-grid">
-            <section className="panel graph-panel">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Criminal network explorer</p>
-                  <h2>Crime / Relationship Graph</h2>
-                </div>
-                <button type="button" className="ghost-button">Filter Risk</button>
-              </div>
-
-              <div ref={graphRef} className="graph-shell">
-                <svg className="graph-lines" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Crime network graph">
-                  {graphLinks.map((link) => {
-                    const source = link.sourceType === 'person' ? nodeMap[link.source] : crimeMap[link.source];
-                    const target = link.targetType === 'person' ? nodeMap[link.target] : crimeMap[link.target] || nodeMap[link.target];
-
-                    if (!source || !target) return null;
-
-                    const midX = (source.x + target.x) / 2;
-                    const midY = (source.y + target.y) / 2;
-
-                    return (
-                      <g key={`${link.source}-${link.target}-${link.label}`}>
-                        <line x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="link-line" />
-                        <text x={midX} y={midY - 2} className="link-label" textAnchor="middle">
-                          {link.label}
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-
-                {graphNodes.map((node) => (
-                  <div key={node.id} className={`graph-node ${node.type} ${node.size === 'large' ? 'large' : ''}`} style={{ left: `${node.x}%`, top: `${node.y}%` }}>
-                    <span className="node-badge">{node.role}</span>
-                    <strong>{node.name}</strong>
-                  </div>
-                ))}
-
-                {graphCrimes.map((crime) => (
-                  <div key={crime.id} className="crime-node" style={{ left: `${crime.x}%`, top: `${crime.y}%` }}>
-                    <span>{crime.name}</span>
-                  </div>
-                ))}
-              </div>
+          {activeTab === 'Entity Graph' ? (
+            <section className="fullspace-graph-container">
+              <NetworkGraph
+                activeQuery={activeQuery}
+                onClose={() => setActiveTab('Overview')}
+              />
             </section>
+          ) : activeTab === 'Timeline' ? (
+            <TimelineView />
+          ) : activeTab === 'Case Workspace' ? (
+            <CaseWorkspaceView />
+          ) : (
+            <>
+              <section className="stats-grid" aria-label="System metrics">
+                {stats.map((stat, index) => (
+                  <article
+                    key={stat.label}
+                    ref={(element) => {
+                      statCardRefs.current[index] = element;
+                    }}
+                    className="stat-card"
+                  >
+                    <div className="stat-label">{stat.label}</div>
+                    <div className="stat-value">{stat.value}</div>
+                    <div className="stat-detail">{stat.detail}</div>
+                  </article>
+                ))}
+              </section>
 
-            <aside className="intel-panel">
-              <div className="panel upload-panel">
-                <div className="panel-header compact">
-                  <div>
-                    <p className="eyebrow">Intelligence intake</p>
-                    <h2>File Upload</h2>
+              <section className="panel chat-focus-panel">
+                <div className="chat-focus-header">
+                  <div className="chat-focus-heading-group">
+
+                    <h2>Entity Graph Intelligence Chat</h2>
+
+                  </div>
+
+                  <div className="intake-actions-group">
+                    <button
+                      type="button"
+                      className="primary-button compact"
+                      onClick={() => {
+                        setActiveTab('Entity Graph');
+                        setIsGraphOpen(true);
+                      }}
+                      title="Open full interactive entity graph directly"
+                    >
+                      Open Entity Graph
+                    </button>
+
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".pdf,.csv,.doc,.docx,.txt,.jpg,.jpeg,.png"
+                      onChange={handleUpload}
+                      className="hidden-input"
+                    />
                   </div>
                 </div>
 
-                <button type="button" className="primary-button" onClick={() => fileInputRef.current?.click()}>
-                  Upload case files
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept=".pdf,.csv,.doc,.docx,.txt,.jpg,.jpeg,.png"
-                  onChange={handleUpload}
-                  className="hidden-input"
-                />
-
-                <div className="file-count">{uploads.length}/2 files uploaded</div>
-                <ul className="file-list">
-                  {uploads.length ? (
-                    uploads.map((file, index) => (
-                      <li key={`${file.name}-${index}`}>
-                        <span>{file.name}</span>
-                        <button type="button" onClick={() => setUploads((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}>Remove</button>
-                      </li>
-                    ))
-                  ) : (
-                    <li className="empty-file">No files selected</li>
-                  )}
-                </ul>
-              </div>
-
-              <div className="panel chat-panel">
-                <div className="panel-header compact">
-                  <div>
-                    <p className="eyebrow">Officer assistant</p>
-                    <h2>Case Chat</h2>
+                {uploads.length > 0 && (
+                  <div className="chat-focus-files-bar">
+                    <span className="files-bar-label">Active Case Dossier Files:</span>
+                    {uploads.map((file, index) => (
+                      <span key={`${file.name}-${index}`} className="file-chip">
+                        {file.name.endsWith('.csv') ? <FileSpreadsheet size={13} /> : <FileText size={13} />}
+                        <span className="chip-file-name">{file.name}</span>
+                        <span className="chip-file-size">({formatFileSize(file.size)})</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove ${file.name}`}
+                          onClick={() => handleRemoveFile(index)}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                    <span className="files-bar-ready-tag"><CheckCircle2 size={12} style={{ display: 'inline', marginRight: 4 }} /> Evidence Indexed</span>
                   </div>
-                </div>
+                )}
 
-                <div className="message-list">
+                <div className="chat-focus-message-feed">
                   {messages.map((message, index) => (
-                    <div key={`${message.sender}-${index}`} className={`message ${message.sender}`}>
-                      {message.text}
+                    <div
+                      key={`${message.sender}-${index}`}
+                      className={`focus-message ${message.sender}`}
+                    >
+                      <div className="focus-message-role">
+                        {message.sender === 'system' ? '' : 'Officer (Badge 2-17)'}
+                      </div>
+                      <div className="focus-message-text">{message.text}</div>
+                      {message.attachedFiles && message.attachedFiles.length > 0 && (
+                        <div className="message-attached-evidence">
+                          <span className="evidence-tag-title"><Paperclip size={12} style={{ display: 'inline', marginRight: 4 }} /> Evidence Transmitted:</span>
+                          <div className="evidence-tags-list">
+                            {message.attachedFiles.map((fn, fIdx) => (
+                              <span key={`${fn}-${fIdx}`} className="evidence-tag-chip">
+                                {fn}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
+                  <div ref={messagesEndRef} />
                 </div>
 
-                <form onSubmit={handleQuerySubmit} className="chat-form">
-                  <label className="sr-only" htmlFor="chat-query">Chat query</label>
-                  <textarea
-                    id="chat-query"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Find me suspicious links around Ravi Desai..."
-                    rows={3}
-                  />
-                  <div className="chat-actions">
-                    <button type="button" className="secondary-button">Recent</button>
-                    <button type="submit" className="primary-button">Run query</button>
+                {isLoadingGraph && (
+                  <div className="graph-loading-overlay">
+                    <div className="graph-loading-modal">
+                      <div className="spinner-ring">
+                        <div className="spinner-core" />
+                      </div>
+                      <div className="loading-status-wrap">
+                        <div className="loading-title">Synthesizing Entity Graph...</div>
+                        <div className="loading-step-text">{loadingStep}</div>
+                        <div className="loading-bar-track">
+                          <div className="loading-bar-fill" />
+                        </div>
+                        <div className="loading-subnote">Processing CDR links, Hawala logs &amp; cross-border safehouses</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="quick-prompts-container">
+                  <div className="quick-prompts-header">
+                    <span className="quick-prompts-title">Select quick inquiry to synthesize network:</span>
+                    {uploads.length === 0 && (
+                      <span className="quick-prompts-note">
+                        *Pick an inquiry or attach evidence to proceed
+                      </span>
+                    )}
+                  </div>
+                  <div className="quick-prompts-chips">
+                    {samplePrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        disabled={isLoadingGraph}
+                        className="prompt-chip-btn"
+                        onClick={() => handleSelectPrompt(prompt)}
+                      >
+                        <span className="chip-icon"><Zap size={13} /></span>
+                        <span>{prompt}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <form onSubmit={handleQuerySubmit} className="chat-focus-input-form">
+                  {uploadError && (
+                    <div className="upload-requirement-alert" role="alert">
+                      <div className="alert-content">
+                        <AlertCircle size={18} className="alert-icon" />
+                        <div className="alert-text">
+                          <strong>Evidence File Required:</strong> {uploadError}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="alert-attach-btn"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <Paperclip size={13} /> Attach File Now
+                      </button>
+                    </div>
+                  )}
+
+                  <div
+                    className={`chat-input-container ${isDragging ? 'drag-active' : ''} ${uploads.length === 0 ? 'needs-file' : 'file-attached'}`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    {/* Evidence Intake Dock */}
+                    <div className="evidence-dock-header">
+                      <div className="evidence-dock-title">
+                        <Paperclip size={14} className="dock-clip-icon" />
+                        <span>Case Evidence Intake</span>
+                        {uploads.length === 0 ? (
+                          <span className="dock-req-tag mandatory">
+                            <span className="pulsing-warn-dot" /> Min. 1 File Required
+                          </span>
+                        ) : (
+                          <span className="dock-req-tag validated">
+                            <CheckCircle2 size={13} /> {uploads.length}/2 Files Attached &amp; Validated
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="evidence-dock-controls">
+                        {uploads.length < 2 && (
+                          <button
+                            type="button"
+                            className="dock-browse-btn"
+                            onClick={() => fileInputRef.current?.click()}
+                          >
+                            <UploadCloud size={13} /> Browse Computer
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Attached cards or empty dropzone */}
+                    {uploads.length > 0 ? (
+                      <div className="attached-files-row">
+                        {uploads.map((file, index) => (
+                          <div key={`${file.name}-${index}`} className="evidence-pill-card">
+                            <div className="evidence-pill-icon">
+                              {file.name.endsWith('.csv') ? (
+                                <FileSpreadsheet size={16} />
+                              ) : (
+                                <FileText size={16} />
+                              )}
+                            </div>
+                            <div className="evidence-pill-meta">
+                              <span className="evidence-pill-name" title={file.name}>{file.name}</span>
+                              <span className="evidence-pill-size">{formatFileSize(file.size)}</span>
+                            </div>
+                            <span className="evidence-ready-badge">Ready</span>
+                            <button
+                              type="button"
+                              className="evidence-pill-del"
+                              onClick={() => handleRemoveFile(index)}
+                              title="Remove file"
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              <X size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div
+                        className="empty-evidence-dropzone"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        <div className="dropzone-callout">
+                          <UploadCloud size={22} className="dropzone-cloud-icon" />
+                          <div className="dropzone-callout-text">
+                            <strong>Attach Case Evidence (At least 1 file required)</strong>
+                            <span>Drag &amp; drop or click to upload CDR logs, Hawala records, FIR, or forensic data (.pdf, .csv, .doc, .png)</span>
+                          </div>
+                        </div>
+                        <div className="dropzone-presets" onClick={(e) => e.stopPropagation()}>
+                          <span className="presets-caption">Quick evidence samples:</span>
+                          <div className="preset-buttons-row">
+                            {sampleEvidencePresets.map((preset) => (
+                              <button
+                                key={preset.name}
+                                type="button"
+                                className="preset-file-btn"
+                                onClick={() => handleAddPresetFile(preset)}
+                                title={`Quick attach ${preset.name}`}
+                              >
+                                + {preset.name.split('_')[0]} Sample
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Textarea */}
+                    <textarea
+                      id="chat-focus-input"
+                      value={query}
+                      disabled={isLoadingGraph}
+                      onChange={(event) => {
+                        setQuery(event.target.value);
+                        if (uploadError && uploads.length > 0) setUploadError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleQuerySubmit(e);
+                        }
+                      }}
+                      placeholder={
+                        isLoadingGraph
+                          ? 'Synthesizing entity network graph... please wait'
+                          : uploads.length === 0
+                            ? 'Attach at least 1 case file above, then enter suspect name or query (e.g. Find me suspicious links around Ravi Desai)...'
+                            : 'Enter suspect name, syndicate query, or crime nexus (e.g. Find me suspicious links around Ravi Desai and the car jacking network)...'
+                      }
+                      rows={3}
+                      autoFocus
+                    />
+
+                    {/* Action Bar */}
+                    <div className="chat-focus-actions">
+                      <div className="actions-meta-bar">
+                        <button
+                          type="button"
+                          className={`dock-attach-trigger-btn ${uploads.length >= 2 ? 'disabled' : ''}`}
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={uploads.length >= 2}
+                        >
+                          <Paperclip size={14} />
+                          <span>{uploads.length ? `Attach File (${uploads.length}/2)` : 'Attach Evidence'}</span>
+                        </button>
+
+                        <span className="input-shortcut-hint">
+                          {isLoadingGraph ? (
+                            <span className="hint-processing">
+                              <span className="mini-spinner" /> Loading graph...
+                            </span>
+                          ) : (
+                            <>Press <kbd>Enter</kbd> to transmit &amp; open Entity Graph</>
+                          )}
+                        </span>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isLoadingGraph}
+                        className="primary-button send-and-open-btn"
+                        title="Transmit query and open entity graph"
+                      >
+                        {isLoadingGraph ? (
+                          <>
+                            <span className="btn-spinner" />
+                            <span>Opening Graph...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>Transmit &amp; Open Entity Graph</span>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                              <path d="M5 12h14M12 5l7 7-7 7" />
+                            </svg>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </form>
-              </div>
-            </aside>
-          </div>
-
-          <section className="panel prototype-note" ref={prototypeNoteRef}>
-            <p className="eyebrow">Prototype intent</p>
-            <h2>What this screen demonstrates</h2>
-            <ul>
-              <li>Government-portal interface styling for an investigation dashboard.</li>
-              <li>Officer can upload a maximum of two files and view them in the intake panel.</li>
-              <li>Natural-language queries are entered in chat and mapped to a mock crime network graph.</li>
-              <li>The graph visually links people, crimes, and supporting entities with relationship labels.</li>
-            </ul>
-          </section>
+              </section>
+            </>
+          )}
         </main>
       </div>
     </div>
